@@ -1,8 +1,5 @@
 # PatchClosure
 
-Method that accompanies the NDSS 2027 submission
-*PatchClosure: Residual Exploit Discovery in Incomplete Web Security Patches*.
-
 Given a first-fixed product `V1`, the official first-fix diff, the seed
 that `V1` now blocks, and two live endpoints, PatchClosure searches for a
 **residual**: another input under the seed's attacker model that still
@@ -32,8 +29,6 @@ you are about to analyze, and delete the trees afterwards.
 
 ## Pipeline
 
-Matches the paper Implementation section:
-
 1. **BUILD** — diff overlay via tree-sitter plus LLM nominations, then
    Joern CPG (CodeQL on JS/Python/Go/Ruby) on a small source tree to
    drop or retarget symbols that are not on the attacker→sink flow;
@@ -43,7 +38,7 @@ Matches the paper Implementation section:
 3. **DISPATCH** — Z3 on the decidable string fragment, else enumeration
    over `Σ_φ` (`k=64`); Semgrep taint + `IssueIdentity` for siblings
    found in the product tree (not in `seed_exec.py` branch names).
-4. **VALIDATE** — one generic checker per Table 1 effect channel.
+4. **VALIDATE** — one generic checker per effect channel.
    The LLM never decides that a residual succeeded.
 
 Offline search is a **candidate generator**. Transcriptions of
@@ -103,9 +98,9 @@ python -m patchclosure selftest
 
 ## Worked examples
 
-Both paper families have a live residual on V1 (controller + Docker,
-answer-blind). Transcripts stay in `out/` and are gitignored — they
-contain per-run `PCBFLAG_*` tokens.
+Language and obligation each have a live residual on V1 (controller +
+Docker, answer-blind). Transcripts stay in `out/` and are gitignored —
+they contain per-run `PCBFLAG_*` tokens.
 
 | Family | Case | What discharged |
 |---|---|---|
