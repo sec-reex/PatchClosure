@@ -11,7 +11,7 @@ DANGER_CHARS = "/.\\\r\n:@"
 def alphabet_from_interpreter(phi: Callable[[str], str], hint: list | None = None) -> list[str]:
     """Keep a symbol iff phi treats it specially, plus structural tokens.
 
-    This is the paper's Σ_φ: symbols the grounded interpreter branches on,
+    Σ_φ is the symbols the grounded interpreter branches on,
     not a payload wordlist.
     """
     seed: list[str] = []

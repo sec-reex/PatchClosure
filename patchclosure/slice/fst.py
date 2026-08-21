@@ -1,4 +1,4 @@
-"""Fit the smallest FST consistent with measured pairs (paper appendix).
+"""Fit the smallest FST consistent with measured pairs.
 
 Regular-within-k only if the fitted transducer reproduces every
 observed pair and a held-out share. Inversion is exact relative to

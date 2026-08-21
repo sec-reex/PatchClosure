@@ -1,4 +1,4 @@
-"""One generic checker per effect channel (paper Table tab:plant).
+"""One generic checker per effect channel.
 
 The oracle invokes the candidate and looks for this trial's PCBFLAG_*
 on the channel. It does not know residual payloads.

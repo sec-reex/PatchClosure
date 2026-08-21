@@ -21,6 +21,18 @@ def test_locate_and_literals(tmp_path: Path):
     assert "%2e" in "".join(extract("decode.js", hit["body"], set()).get("literals") or []) or True
 
 
+def test_hex_escapes_in_source_become_probes():
+    src = r"var left = /[\x09\x0b\x20]+/;"
+    ps = probe.probes_from_source(src)
+    assert "\x09" in ps and "\x0b" in ps
+
+
+def test_trim_source_probes_c0_on_seed_token():
+    src = "function sanitize(p) { return String(p).trim(); }\n"
+    ps = probe.probes_from_source(src, extra_hint=["http://x\\@y"])
+    assert any(p.startswith("\x08") or (p and ord(p[0]) < 32) for p in ps if p)
+
+
 def test_probes_capped_at_256():
     src = "const a = '%u002e'; const b = '../'; if (x === '%2e') {}"
     ps = probe.probes_from_source(src)

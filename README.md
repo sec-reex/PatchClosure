@@ -35,9 +35,11 @@ you are about to analyze, and delete the trees afterwards.
    slice and execute `φ` (up to 256 branch probes); fit an FST. Set
    `PATCHCLOSURE_JOERN=0` / `PATCHCLOSURE_CODEQL=0` to skip a frontend.
 2. **MATCH** — language gap vs obligation gap vs unclear.
-3. **DISPATCH** — Z3 on the decidable string fragment, else enumeration
-   over `Σ_φ` (`k=64`); Semgrep taint + `IssueIdentity` for siblings
-   found in the product tree (not in `seed_exec.py` branch names).
+3. **DISPATCH** — Z3 or enumeration over `Σ_φ`; SE-lite on this
+   instance's guard literals and seed shape; an LLM agent that proposes
+   other seed-field values from the patch / overlay / measured `φ` /
+   probe API. Semgrep taint + `IssueIdentity` for siblings in the
+   product tree. No CVE gadget table.
 4. **VALIDATE** — one generic checker per effect channel.
    The LLM never decides that a residual succeeded.
 
@@ -109,8 +111,10 @@ they contain per-run `PCBFLAG_*` tokens.
 | language | PCBV2-0154 | start-anchor (`^` in the guard) using an IP already in the seed |
 | obligation | PCBV2-0016 | `IssueIdentity`: same CRLF tail, path field → host field |
 
-`seed_exec.py` is the live probe only. Its `if op == ...` branches are
-not a sibling catalog.
+`seed_exec.py` is the live transport. DISPATCH may read the parameter
+names and branch values that probe already exposes as an API. Residual
+payloads still have to come from this case's patch, seed, and measured
+`φ` — not from a global bypass list.
 
 ## Layout
 

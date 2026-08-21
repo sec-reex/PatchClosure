@@ -1,7 +1,7 @@
 """Patch overlay: map the unified diff onto v1 program points.
 
 Added predicates and normalizers become guard nodes at the sites that
-host them (paper §impl).
+host them.
 """
 from __future__ import annotations
 

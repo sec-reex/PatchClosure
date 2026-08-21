@@ -1,4 +1,4 @@
-"""CodeQL dataflow frontend (paper §impl).
+"""CodeQL dataflow frontend.
 
 Supplies the same two edges as Joern: attacker-value → sink reachability,
 and whether a guard hunk sits on that dataflow.

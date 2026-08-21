@@ -2,7 +2,7 @@
 # method input. Stage copies only patch_real.diff and the seed under exp/.
 # Do not fetch all twenty source trees at once: several products are large.
 #
-# Paper language-gap set (plus one robust NONE and one obligation case):
+# Small language-gap cases (plus one robust NONE and one obligation case):
 PCBV2-0001
 PCBV2-0009
 PCBV2-0029

@@ -45,7 +45,7 @@ BENCHMARK_ROOT = Path(
 )
 
 N_ENSEMBLE = int(os.environ.get("PATCHCLOSURE_ENSEMBLE", "3"))
-# Paper §impl: k=64 bytes (128 if the blocked seed is already longer).
+# k=64 bytes (128 if the blocked seed is already longer).
 KMAX_BYTES = int(os.environ.get("PATCHCLOSURE_KMAX_BYTES", "64"))
 KMAX = int(os.environ.get("PATCHCLOSURE_KMAX", "4"))  # token-product depth for enum
 CANDIDATE_CAP = int(os.environ.get("PATCHCLOSURE_CAP", "60"))

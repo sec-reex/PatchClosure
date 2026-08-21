@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from itertools import product
 
 
@@ -13,7 +14,17 @@ def _int_token(part: str) -> int:
 
 
 def parse_ipv4(text: str) -> list[int] | None:
-    parts = text.split(".")
+    raw = (text or "").strip().strip("[]")
+    if raw in {":1", "::1", "0:0:0:0:0:0:0:1"}:
+        return [127, 0, 0, 1]
+    mapped = re.match(r"(?i)::ffff:([\d.]+)$", raw)
+    if mapped:
+        return parse_ipv4(mapped.group(1))
+    hexmap = re.match(r"(?i)::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$", raw)
+    if hexmap:
+        hi, lo = int(hexmap.group(1), 16), int(hexmap.group(2), 16)
+        return [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255]
+    parts = raw.split(".")
     try:
         if len(parts) == 1:
             n = _int_token(parts[0])
@@ -58,6 +69,10 @@ def _compress(octets: list[int]) -> list[str]:
         out.append(f"{a}.{d}")
     if c == 0:
         out.append(f"{a}.{b}.{d}")
+    out.append(f"[::ffff:{a}.{b}.{c}.{d}]")
+    hi, lo = (a << 8) | b, (c << 8) | d
+    out.append(f"[::ffff:{hi:x}:{lo:x}]")
+    out.append(f"[::ffff:{hi:04x}:{lo:04x}]")
     return out
 
 

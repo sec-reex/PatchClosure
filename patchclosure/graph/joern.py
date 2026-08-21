@@ -1,4 +1,4 @@
-"""Classical graph via Joern CPG (paper §impl).
+"""Classical graph via Joern CPG.
 
 Answers: is the nominated sink reachable from the attacker value, and
 which guard hunk sits on that same attacker-to-sink dataflow.

@@ -1,4 +1,4 @@
-"""Cut nominated interpreters with tree-sitter (paper §impl)."""
+"""Cut nominated interpreters with tree-sitter."""
 from __future__ import annotations
 
 import re

@@ -1,6 +1,7 @@
 """Ground nominated interpreters by slicing and executing them."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -22,7 +23,7 @@ _JS_KW = {
 }
 
 
-def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
+def ground_interpreter(srcroot: Path | None, pcg: dict, seed: dict | None = None) -> dict:
     interp = pcg.get("interpreter") or {}
     fn = interp.get("fn") or ""
     locus = str(interp.get("locus") or "in-product")
@@ -38,12 +39,13 @@ def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
         locus = "stdlib"
         out["locus"] = locus
 
+    hints = _seed_hints(seed)
     if locus == "stdlib":
         phi = _stdlib_phi(last)
         if phi is None:
             out["status"] = f"unknown stdlib op {fn!r}"
             return out
-        probes = P.probes_from_source(fn)
+        probes = P.probes_from_source(fn, extra_hint=hints)
         pairs = P.measure(phi, probes)
         out.update(_finish(phi, dpred, pairs, source=fn))
         out["status"] = "built" if pairs else "stdlib produced no pairs"
@@ -54,7 +56,7 @@ def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
         kind = "url" if re.search(r"url|browser|whatwg", fn, re.I) else "unquote"
         if re.search(r"strtol|parseInt|ip2long", fn, re.I):
             kind = "strtol"
-        probes = P.probes_from_source(fn)
+        probes = P.probes_from_source(fn, extra_hint=hints)
         try:
             ys = E.run_external(kind, probes)
             pairs = list(zip(probes, [str(y) for y in ys]))
@@ -75,7 +77,7 @@ def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
         out["dropped"] = True
         return out
     src = loc["body"] + "\n" + loc.get("file_text", "")[:4000]
-    probes = P.probes_from_source(src)
+    probes = P.probes_from_source(src, extra_hint=_seed_hints(seed))
     transcribed = _phi_from_source(loc)
     if transcribed:
         pairs = P.measure(transcribed, probes)
@@ -86,20 +88,35 @@ def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
         return out
     built = _exec_slice(loc, dpred)
     if built.get("error") or not built.get("phi"):
-        phi = _phi_from_source(loc)
-        if not phi:
-            out["status"] = built.get("error") or "slice failed"
-            out["slice"] = {k: built.get(k) for k in ("path", "line", "lang")}
+        loc2, built2 = _retry_unary(srcroot, loc, dpred)
+        if built2.get("phi"):
+            loc, built = loc2 or loc, built2
+        else:
+            phi = _phi_from_source(loc)
+            if not phi:
+                out["status"] = built.get("error") or "slice failed"
+                out["slice"] = {k: built.get(k) for k in ("path", "line", "lang")}
+                return out
+            pairs = P.measure(phi, probes)
+            out.update(_finish(phi, dpred, pairs, source=loc["body"]))
+            out["runtime"] = "source-transcribe"
+            out["slice"] = {"path": str(loc["path"]), "line": loc["line"], "lang": loc["lang"]}
+            out["status"] = "built" if pairs else "transcribe produced no pairs"
             return out
-        pairs = P.measure(phi, probes)
-        out.update(_finish(phi, dpred, pairs, source=loc["body"]))
-        out["runtime"] = "source-transcribe"
-        out["slice"] = {"path": str(loc["path"]), "line": loc["line"], "lang": loc["lang"]}
-        out["status"] = "built" if pairs else "transcribe produced no pairs"
-        return out
     phi = built["phi"]
     admits = built.get("admits") or (lambda _x: True)
+    src = loc["body"] + "\n" + loc.get("file_text", "")[:4000]
+    probes = P.probes_from_source(src, extra_hint=hints)
     pairs = P.measure(phi, probes)
+    if not pairs:
+        loc2, built2 = _retry_unary(srcroot, loc, dpred)
+        if built2.get("phi"):
+            loc, built = loc2 or loc, built2
+            phi, admits = built["phi"], built.get("admits") or (lambda _x: True)
+            src = loc["body"] + "\n" + loc.get("file_text", "")[:4000]
+            probes = P.probes_from_source(src, extra_hint=hints)
+            pairs = P.measure(phi, probes)
+            out["fn"] = loc.get("name") or out.get("fn")
     if not pairs:
         phi2 = _phi_from_source(loc)
         if phi2:
@@ -111,6 +128,50 @@ def ground_interpreter(srcroot: Path | None, pcg: dict) -> dict:
     out["slice"] = {"path": str(loc["path"]), "line": loc["line"], "lang": loc["lang"]}
     out["status"] = "built" if pairs else "slice executed but produced no pairs"
     return out
+
+
+def _retry_unary(srcroot: Path | None, loc: dict, dpred) -> tuple[dict | None, dict]:
+    """Nominated φ may be a 2-arg helper. Try unary decoders in the same file."""
+    if not srcroot or not loc:
+        return None, {}
+    from patchclosure.slice.treesitter import list_functions, locate_function
+
+    here = [str(Path(loc["path"]).name)] if loc.get("path") else None
+    names = list_functions(srcroot, here) if here else []
+    prefer = [n for n in names if re.search(r"trim|decode|unquote|extractProtocol|normalize", n, re.I)]
+    tried = {str(loc.get("name") or "")}
+    for name in prefer + [n for n in names if n not in prefer]:
+        if name in tried:
+            continue
+        tried.add(name)
+        alt = locate_function(srcroot, name)
+        if not alt or len(alt.get("params") or []) > 2:
+            continue
+        built = _exec_slice(alt, dpred)
+        if built.get("phi"):
+            return alt, built
+    return None, {}
+
+
+def _seed_hints(seed: dict | None) -> list[str]:
+    """Tokens already on the seed (NAVEX: solver constraints from the exploit seed)."""
+    if not seed:
+        return []
+    from patchclosure.assemble import PAYLOAD_KEYS
+
+    hints: list[str] = []
+    for key in PAYLOAD_KEYS:
+        val = seed.get(key)
+        if not isinstance(val, str) or not val:
+            continue
+        if len(val) <= 80:
+            hints.append(val)
+        for ch in val:
+            if ch not in hints:
+                hints.append(ch)
+            if len(hints) >= 40:
+                return hints
+    return hints
 
 
 def _finish(phi, danger, pairs, source="", admits=None):
@@ -209,7 +270,36 @@ def _exec_slice(loc: dict, dpred) -> dict:
     return {"error": f"slice-exec not wired for {lang}"}
 
 
+def _exec_js_require(path: Path, fname: str) -> dict | None:
+    """Run the published file via require(), not a sliced copy (NAVEX: real runtime)."""
+    path = Path(path)
+    if path.suffix != ".js" or not path.is_file():
+        return None
+    js = (
+        f"const m=require({json.dumps(str(path.resolve()))});\n"
+        f"f=(x)=>{{let fn=(m&&m.{fname})||m; let y;\n"
+        "try{y=(typeof fn==='function')?fn(x):fn;\n"
+        "if(y&&typeof y==='object'){y=JSON.stringify({host:y.host,hostname:y.hostname,href:y.href,slashes:y.slashes,rest:y.rest});}\n"
+        "}catch(e){y=String(e);} return (typeof y==='string')?y:String(y);};"
+    )
+    try:
+        worker = E.NodeWorker(js)
+        worker.call("x")  # smoke
+    except Exception:
+        return None
+    return {
+        "phi": lambda x, w=worker: w.call(x),
+        "runtime": "node-require",
+        "worker": worker,
+        "path": str(path),
+        "lang": "javascript",
+    }
+
+
 def _exec_js(loc, body, fname, params, dpred) -> dict:
+    required = _exec_js_require(Path(loc["path"]), fname) if loc.get("path") else None
+    if required:
+        return required
     helpers = _js_helpers(loc.get("file_text") or "", body)
     if body.lstrip().startswith("function"):
         if re.match(r"\s*function\s*\(", body):
@@ -234,6 +324,7 @@ def _exec_js(loc, body, fname, params, dpred) -> dict:
     )
     try:
         worker = E.NodeWorker(js)
+        worker.call("x")
     except Exception as exc:
         return {"error": f"node spawn failed: {exc}"}
     return {
@@ -247,17 +338,36 @@ def _exec_js(loc, body, fname, params, dpred) -> dict:
 
 
 def _js_helpers(file_text: str, body: str) -> str:
-    """Keep top-level function / const helpers the slice names."""
-    needed = set(re.findall(r"\b([A-Za-z_$][\w$]*)\b", body)) - _JS_KW
-    kept = []
+    """Keep top-level helpers the slice names (including comma-chained var)."""
+    needed = set(re.findall(r"(?<![.\w])([A-Za-z_$][\w$]*)\b", body)) - _JS_KW
+    assigns: list[tuple[str, str]] = []
     for match in re.finditer(
-        r"(?:function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{[^}]*\})"
-        r"|(?:(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;]+;)",
+        r"(?:^|,)\s*([A-Za-z_$][\w$]*)\s*=\s*([^,;]+)",
         file_text,
+        re.M,
     ):
-        name = match.group(1) or match.group(2)
-        if name in needed and "require(" not in match.group(0):
-            kept.append(match.group(0))
+        name, expr = match.group(1), match.group(2).strip()
+        if "require(" in expr:
+            continue
+        assigns.append((name, expr))
+    by_name = {n: e for n, e in assigns}
+    changed = True
+    while changed:
+        changed = False
+        for name in list(needed):
+            expr = by_name.get(name)
+            if not expr:
+                continue
+            for dep in re.findall(r"(?<![.\w])([A-Za-z_$][\w$]*)\b", expr):
+                if dep not in _JS_KW and dep not in needed and dep in by_name:
+                    needed.add(dep)
+                    changed = True
+    kept: list[str] = []
+    seen: set[str] = set()
+    for name, expr in assigns:
+        if name in needed and name not in seen:
+            seen.add(name)
+            kept.append(f"var {name}={expr};")
     return "\n".join(kept)
 
 

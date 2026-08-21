@@ -1,4 +1,4 @@
-"""SMT string-fragment preimage (paper §impl).
+"""SMT string-fragment preimage.
 
 Prefix, contains, length, and regular constraints go to Z3. Anything
 outside that fragment is decided by executing the guard and φ.

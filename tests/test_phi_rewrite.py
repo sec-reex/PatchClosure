@@ -4,6 +4,92 @@ from patchclosure.ip_enum import gen_ip_candidates
 from patchclosure.preimage import ips_in_seed, seed_rewrites
 
 
+def test_phi_inverse_rewrites_decoded_form_in_seed():
+    pairs = [("%2e", "."), (".", ".")]
+    frags = seed_rewrites({"path": "/./WEB-INF/x"}, pairs)
+    xs = [f.get("x") for f in frags]
+    assert any(x and "%2e" in str(x) for x in xs)
+
+
+def test_phi_eraser_prefixes_empty_output():
+    pairs = [("\x08", ""), ("\\", "\\")]
+    frags = seed_rewrites({"to": "http://evil\\@ok"}, pairs)
+    xs = [f.get("x") for f in frags]
+    assert any(str(x).startswith("\x08") for x in xs)
+    assert any(isinstance(f.get("candidate"), dict) and str(f["candidate"].get("to", "")).startswith("\x08") for f in frags)
+
+
+def test_field_move_replays_token_on_sibling_field():
+    seed = {"host": "127.0.0.1", "path": "/x\r\nGET flag HTTP/1.1", "query": "a=1"}
+    sibs = discover_siblings(None, seed)
+    moves = [s for s in sibs if s.get("kind") == "field-move"]
+    assert moves
+    cand = issue_identity(seed, moves[0])
+    assert cand and cand.get("_assemble", "").startswith("issue-identity:")
+
+
+def test_scheme_from_seed_shape_not_scheme_table():
+    from patchclosure.agent import scheme_variants
+
+    sch = scheme_variants({"url": "phar://work/x"})
+    assert any("phar:///" in str(f.get("x")) for f in sch)
+    assert any(str(f.get("x")).startswith("PHAR://") for f in sch)
+
+
+def test_token_shift_only_uses_literals_from_this_guard():
+    from patchclosure.agent import guard_token_shift
+
+    only = guard_token_shift(
+        {"path": "__proto__.pcbUnlock"},
+        [{"code": "if (k === '__proto__') return;"}],
+    )
+    xs = [str(f.get("x")) for f in only]
+    assert not any("constructor.prototype" in x for x in xs)
+    assert not any("a.__proto__" in x for x in xs)
+    two = guard_token_shift(
+        {"path": "__proto__.pcbUnlock"},
+        [{"code": "if (k === '__proto__' || k === 'constructor') return;"}],
+    )
+    assert any("constructor" in str(f.get("x")) and "constructor.prototype" not in str(f.get("x")) for f in two)
+
+
+def test_agent_source_has_no_bypass_alias_table():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "patchclosure" / "agent.py").read_text()
+    for banned in (
+        "constructor.prototype",
+        "a.__proto__",
+        "PHAR://",
+        "phar:///",
+        'mode"] = "residual"',
+    ):
+        assert banned not in src
+
+
+def test_map_nest_and_sibling_maps():
+    from patchclosure.agent import map_nest, sibling_maps
+
+    seed = {"mode": "a", "query": {"#x": "1"}}
+    assert any("x" in (f["candidate"].get("query") or {}) for f in map_nest(seed))
+    moved = sibling_maps(seed, 'candidate.get("destination_query")')
+    assert any(f["candidate"].get("destination_query") == {"#x": "1"} for f in moved)
+
+
+def test_probe_space_reads_switch_literals():
+    from patchclosure.agent import probe_space
+
+    text = 'def run_probe(c):\n    if probe == "copy":\n        pass\n    elif probe == "move":\n        pass\n'
+    frags = probe_space({"probe": "move"}, text)
+    assert any(f.get("x") == "copy" for f in frags)
+
+
+def test_agent_propose_noop_without_seed():
+    from patchclosure.agent import propose
+
+    assert propose(seed=None, diff="", guards=[], pairs=[]) == []
+
+
 def test_phi_equivalent_rewrites_seed_token():
     pairs = [("%2e", "."), ("%u002e", "."), ("%2E", "."), ("abc", "abc")]
     frags = seed_rewrites({"path": "/%2e/WEB-INF/pcb-secret.txt"}, pairs)
@@ -27,6 +113,11 @@ def test_no_bypass_catalog_without_measurement():
     )
     assert empty == []
     assert ips_in_seed({"host": "0177.0.0.1"}) == ["0177.0.0.1"]
+    assert ips_in_seed({"avatar": "http://[::1]:9111/"}) == ["[::1]"]
+    from patchclosure.ip_enum import encodings_of, parse_ipv4
+
+    assert parse_ipv4("[::1]") == [127, 0, 0, 1]
+    assert any(x == "[::ffff:7f00:1]" for x in encodings_of([127, 0, 0, 1]))
 
 
 def test_ip_enum_only_from_seed_target():

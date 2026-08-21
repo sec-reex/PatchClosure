@@ -14,6 +14,7 @@ _IPV4 = re.compile(
     rf"\b(?:0x[0-9a-f]{{6,8}}|{_OCTET}(?:\.{_OCTET}){{1,3}})\b",
     re.I,
 )
+_IP6 = re.compile(r"\[(?:::[0-9a-fA-F:.]+)\]")
 
 
 def seed_rewrites(seed: dict | None, pairs: list[tuple[str, str]] | None) -> list[dict]:
@@ -36,22 +37,66 @@ def seed_rewrites(seed: dict | None, pairs: list[tuple[str, str]] | None) -> lis
             continue
         for w in uniq:
             alts[w] = [u for u in uniq if u != w]
-    if not alts:
-        return []
     out: list[dict] = []
     seen: set[str] = set()
     from patchclosure.assemble import PAYLOAD_KEYS
 
-    for text in _seed_strings(seed, keys=PAYLOAD_KEYS):
+    def _emit(rewritten: str, backend: str, key: str | None = None):
+        mark = (key, rewritten)
+        if mark in seen:
+            return
+        seen.add(mark)
+        item = {"x": rewritten, "backend": backend}
+        if key:
+            cand = dict(seed)
+            cand[key] = rewritten
+            item["candidate"] = cand
+        out.append(item)
+
+    keys = [
+        k for k in PAYLOAD_KEYS
+        if isinstance(seed.get(k), str) and any(
+            t in seed[k] for t in ("\\", "\r\n", "../", "%2e", "%2E")
+        )
+    ] or [k for k in PAYLOAD_KEYS if isinstance(seed.get(k), str)]
+    for key in keys:
+        text = seed.get(key)
+        if not isinstance(text, str) or not text:
+            continue
         for old, news in sorted(alts.items(), key=lambda kv: -len(kv[0])):
             if old not in text:
                 continue
             for new in news:
-                rewritten = text.replace(old, new, 1)
-                if rewritten in seen:
+                _emit(text.replace(old, new, 1), "phi-equivalent", key)
+        # FST inverse the other way: a measured output that already sits
+        # in the seed can be replaced by any preimage of that output.
+        # Skip single alnum so we do not rewrite every "a".
+        for y, ins in by_y.items():
+            if not y or y.isalnum():
+                continue
+            if y not in text:
+                continue
+            for new in ins:
+                if new == y:
                     continue
-                seen.add(rewritten)
-                out.append({"x": rewritten, "backend": "phi-equivalent"})
+                _emit(text.replace(y, new, 1), "phi-inverse", key)
+        # Unique 1-char erasers (space*n collapses to ' '). Boundary inserts
+        # first: a leading trim is a no-op on any parser that also trims.
+        erasers: list[str] = []
+        for a, b in pairs or []:
+            if b != "" or not a or a.isalnum():
+                continue
+            tok = a[0] if len(set(a)) == 1 else a
+            if tok not in erasers:
+                erasers.append(tok)
+        erasers = erasers[:16]
+        for i, ch in enumerate(text):
+            if ch not in ":/\\@":
+                continue
+            for inp in erasers:
+                _emit(text[: i + 1] + inp + text[i + 1 :], "phi-boundary", key)
+        for inp in erasers[:4]:
+            _emit(inp + text, "phi-eraser", key)
     return out
 
 
@@ -61,9 +106,9 @@ def ips_in_seed(seed: dict | None) -> list[str]:
 
     found: list[str] = []
     for text in _seed_strings(seed, keys=PAYLOAD_KEYS):
-        for m in _IPV4.finditer(text):
+        for m in list(_IPV4.finditer(text)) + list(_IP6.finditer(text)):
             tok = m.group(0)
-            if "." not in tok and not tok.lower().startswith("0x"):
+            if "." not in tok and not tok.lower().startswith("0x") and "::" not in tok:
                 continue
             if parse_ipv4(tok) and tok not in found:
                 found.append(tok)

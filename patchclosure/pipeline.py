@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from patchclosure import (
+    agent,
     build,
     carriers,
     config,
@@ -112,7 +113,8 @@ def analyze(ws: Workspace | str | Path) -> dict:
     out["graph"] = {k: graph[k] for k in graph if k != "cpg"}
     out["graph"]["cpg"] = graph.get("cpg")
 
-    grounded = ground_interpreter(srcroot, pcg)
+    seed = load_seed_candidate(ws.exp)
+    grounded = ground_interpreter(srcroot, pcg, seed=seed)
     out["ground"] = {
         k: grounded[k]
         for k in grounded
@@ -121,7 +123,6 @@ def analyze(ws: Workspace | str | Path) -> dict:
     if grounded.get("dropped"):
         out["warnings"].append(grounded.get("status"))
 
-    seed = load_seed_candidate(ws.exp)
     verdict = match.classify(pcg, seed)
     out["pcg"] = {
         k: pcg[k]
@@ -141,6 +142,13 @@ def _dispatch(ws, pcg, verdict, grounded, guards) -> dict:
     seed = load_seed_candidate(ws.exp)
     phi_near = preimage.seed_rewrites(seed, grounded.get("pairs") or [])
 
+    agent_frags = agent.propose(
+        seed=seed,
+        diff=ws.diff_text,
+        guards=guards,
+        pairs=grounded.get("pairs") or [],
+        probe_text=agent.probe_text(ws.exp),
+    )
     siblings = carriers.discover_siblings(srcroot, seed)
     if verdict["family"] == "obligation" or siblings:
         spec = {}
@@ -174,7 +182,7 @@ def _dispatch(ws, pcg, verdict, grounded, guards) -> dict:
             return {
                 "kind": "obligation" if fragments else "language",
                 **enum,
-                "fragments": _uniq(phi_near + fragments)[: config.CANDIDATE_CAP],
+                "fragments": _uniq(agent_frags + phi_near + fragments)[: config.CANDIDATE_CAP],
                 "static_evidence": static,
             }
         # keep sibling identities alongside the language/IP search
@@ -198,7 +206,7 @@ def _dispatch(ws, pcg, verdict, grounded, guards) -> dict:
                     if ip in text and x:
                         wrapped.append({"x": text.replace(ip, x, 1), "backend": "ip-radix"})
             wrapped.append(frag)
-        gen["fragments"] = _uniq(obligation_frags + phi_near + wrapped)[: config.CANDIDATE_CAP]
+        gen["fragments"] = _uniq(agent_frags + obligation_frags + phi_near + wrapped)[: config.CANDIDATE_CAP]
         gen["kind"] = "ssrf_ip"
         return gen
 
@@ -250,11 +258,11 @@ def _dispatch(ws, pcg, verdict, grounded, guards) -> dict:
             "smt": {k: smt_hit[k] for k in smt_hit if k != "witnesses"} if smt_hit else None,
             "enum": {k: enum[k] for k in enum if k != "alphabet"},
             "alphabet": grounded.get("alphabet"),
-            "fragments": _uniq(obligation_frags + phi_near + fragments)[: config.CANDIDATE_CAP],
+            "fragments": _uniq(agent_frags + obligation_frags + phi_near + fragments)[: config.CANDIDATE_CAP],
             "kmax_bytes": kmax,
         }
 
-    # Slice failed: still invert the overlay guard as identity φ (paper: L_G
+    # Slice failed: still invert the overlay guard as identity φ (L_G
     # by executing the added predicate). Do not dump a transcribed wordlist.
     reject = _reject_literal(guard_code)
     if reject and grounded.get("danger"):
@@ -274,13 +282,13 @@ def _dispatch(ws, pcg, verdict, grounded, guards) -> dict:
             "kind": "language",
             "backend": "z3" if backend == "z3" else "overlay-exec",
             "smt": {k: smt_hit[k] for k in smt_hit if k != "witnesses"} if smt_hit else None,
-            "fragments": _uniq(obligation_frags + phi_near + fragments)[: config.CANDIDATE_CAP],
+            "fragments": _uniq(agent_frags + obligation_frags + phi_near + fragments)[: config.CANDIDATE_CAP],
             "note": grounded.get("status") or "no measured interpreter",
         }
     return {
         "kind": "obligation" if obligation_frags else "language",
         "backend": "issue-identity" if obligation_frags else None,
-        "fragments": _uniq(obligation_frags)[: config.CANDIDATE_CAP],
+        "fragments": _uniq(agent_frags + obligation_frags)[: config.CANDIDATE_CAP],
         "note": grounded.get("status") or "no measured interpreter",
     }
 

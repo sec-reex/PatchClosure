@@ -1,4 +1,4 @@
-"""Run sliced interpreters in the real language runtime (paper §impl).
+"""Run sliced interpreters in the real language runtime.
 
 JavaScript and Python run natively. PHP, Ruby, Go, Java, and Rust run
 in a per-language subprocess (or a toolchain container if the runtime

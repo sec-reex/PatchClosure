@@ -82,7 +82,7 @@ def cmd_fire(args) -> int:
 
 
 def cmd_live(args) -> int:
-    """Paper VALIDATE against a controller V1 run (current /api/v1/runs API)."""
+    """VALIDATE against a controller V1 run (current /api/v1/runs API)."""
     case = args.case
     ws = load_workspace(Path(args.workspace) if args.workspace else config.WORK / case)
     created = platform.create_run(case, version="v1")

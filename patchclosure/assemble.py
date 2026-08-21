@@ -62,9 +62,21 @@ def load_seed_candidate(exp_dir: Path | None) -> dict:
 
 
 def payload_key(cand: dict) -> str:
-    for key in PAYLOAD_KEYS:
-        if key in cand and isinstance(cand[key], (str, list)):
-            return key
+    scored: list[tuple[int, int, str]] = []
+    for i, key in enumerate(PAYLOAD_KEYS):
+        val = cand.get(key)
+        if not isinstance(val, (str, list)):
+            continue
+        text = val if isinstance(val, str) else " ".join(str(x) for x in val)
+        score = 0
+        if any(tok in text for tok in ("\r\n", "\\", "../", "%2e", "%2E")):
+            score += 2
+        if key in {"to", "url", "href", "value", "filter", "header_value"}:
+            score += 1
+        scored.append((-score, i, key))
+    if scored:
+        scored.sort()
+        return scored[0][2]
     for key, val in cand.items():
         if isinstance(val, str) and key not in {"probe_id", "method", "sink"}:
             return key

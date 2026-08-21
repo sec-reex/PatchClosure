@@ -1,4 +1,4 @@
-"""Probe set from the interpreter's own branch structure (paper §impl).
+"""Probe set from the interpreter's own branch structure.
 
 Up to 256 inputs: literal bytes and escape forms the slice tests, at
 the lengths it distinguishes. Not a payload wordlist.
@@ -13,6 +13,13 @@ from patchclosure.slice.treesitter import literals_in
 
 ESCAPE_FORMS = ("%s", "%02x", "%02X", "%u%04x", "\\x%02x", "\\u%04x")
 
+# Character class the slice itself tests (trim / C0 / \s). Not a CVE list.
+_CLASS_C0 = re.compile(
+    r"trim|strip|lstrip|rstrip|isSpace|isspace|isSpecial|isControl|"
+    r"charCodeAt|\\\\s|<=\s*32|<\s*33|<\s*0x20|<=\s*0x1f|<=\s*0x20",
+    re.I,
+)
+
 
 def probes_from_source(source: str, extra_hint: list[str] | None = None, cap: int | None = None) -> list[str]:
     cap = cap if cap is not None else config.PROBE_BUDGET
@@ -24,6 +31,14 @@ def probes_from_source(source: str, extra_hint: list[str] | None = None, cap: in
         for ch in lit:
             if ch not in chars:
                 chars.append(ch)
+    for hex2 in re.findall(r"\\x([0-9A-Fa-f]{2})", source or ""):
+        ch = chr(int(hex2, 16))
+        if ch not in chars:
+            chars.append(ch)
+    for hex4 in re.findall(r"\\u([0-9A-Fa-f]{4})", source or ""):
+        ch = chr(int(hex4, 16))
+        if ch not in chars:
+            chars.append(ch)
     for ch in "/.%\\:@\r\n\t?#&=;":
         if ch not in chars:
             chars.append(ch)
@@ -44,6 +59,12 @@ def probes_from_source(source: str, extra_hint: list[str] | None = None, cap: in
         add("%%u%04x" % ord(ch))
     for tok in tokens:
         add(tok)
+    if _CLASS_C0.search(source or ""):
+        seeds = [t for t in tokens if t and 0 < len(t) <= 24][:6]
+        for code in range(32):
+            add(chr(code))
+            for tok in seeds:
+                add(chr(code) + tok)
     for ch in chars:
         for n in sorted(lengths):
             add(ch * n)

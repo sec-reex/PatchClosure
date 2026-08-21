@@ -157,7 +157,8 @@ def enumerate_carriers(root: Path | None, spec: dict) -> dict:
 def discover_siblings(root: Path | None, seed: dict | None, exec_mod=None) -> list[dict]:
     """Sibling carriers in the product tree or the seed's own fields.
 
-    `exec_mod` is ignored: seed_exec.py is the live probe, not a sibling catalog.
+    `exec_mod` is ignored here. Product-tree / seed-field siblings only;
+    the live probe's API is handled separately in `agent.probe_space`.
     """
     if not seed:
         return []
@@ -182,7 +183,50 @@ def discover_siblings(root: Path | None, seed: dict | None, exec_mod=None) -> li
         out.append({"path": "host", "code": "host", "line": 0, "kind": "field"})
     if seed.get("component") == "path" and isinstance(seed.get("url"), str) and "\r\n" in seed["url"]:
         out.append({"path": "host", "code": "component=host", "line": 0, "kind": "component"})
+    # NAVEX / SemFuzz: same request, move a seed token the guard already
+    # mentions (or a CRLF / .. already on the seed) onto another payload field.
+    from patchclosure.assemble import PAYLOAD_KEYS
+
+    fields = [(k, seed[k]) for k in PAYLOAD_KEYS if isinstance(seed.get(k), str) and seed[k]]
+    markers = _field_markers(seed, fields)
+    for src_k, src_v in fields:
+        for token in markers:
+            if token not in src_v:
+                continue
+            for dst_k, _dst_v in fields:
+                if dst_k == src_k:
+                    continue
+                key = f"move:{src_k}->{dst_k}:{token[:12]}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({
+                    "path": dst_k,
+                    "code": f"{src_k}->{dst_k}",
+                    "line": 0,
+                    "kind": "field-move",
+                    "src": src_k,
+                    "dst": dst_k,
+                    "token": token,
+                })
     return out[:24]
+
+
+def _field_markers(seed: dict, fields: list[tuple[str, str]]) -> list[str]:
+    """Tokens already on the seed, or quoted literals that also occur there."""
+    marks: list[str] = []
+    for _k, val in fields:
+        if "\r\n" in val:
+            tail = val.split("\r\n", 1)[1]
+            marks.append("\r\n" + tail.split(" HTTP/")[0] if tail else "\r\n")
+            marks.append("\r\n")
+        elif "\n" in val:
+            marks.append("\n" + val.split("\n", 1)[1][:40])
+        if "../" in val:
+            marks.append("../")
+        if "..\\" in val:
+            marks.append("..\\")
+    return list(dict.fromkeys(m for m in marks if m))
 
 
 def _http_routes(root: Path) -> list[str]:
@@ -249,6 +293,20 @@ def issue_identity(seed: dict, carrier: dict) -> dict | None:
         cand["_assemble"] = "issue-identity:host"
         cand["_carrier"] = {"path": "host", "line": carrier.get("line")}
         return cand
+    if kind == "field-move":
+        src, dst, token = carrier.get("src"), carrier.get("dst"), carrier.get("token")
+        if not (src and dst and token and isinstance(cand.get(src), str) and token in cand[src]):
+            return None
+        moved = deepcopy(cand)
+        moved[src] = moved[src].replace(token, "", 1)
+        base = moved[dst] if isinstance(moved.get(dst), str) else ""
+        if token.startswith("\r\n") and dst == "host" and base and not base.endswith("\r\n"):
+            moved[dst] = base + "\r\n " + token[2:]
+        else:
+            moved[dst] = base + token
+        moved["_assemble"] = f"issue-identity:{src}->{dst}"
+        moved["_carrier"] = {"path": dst, "line": carrier.get("line")}
+        return moved
     if kind == "component" and isinstance(cand.get("url"), str) and "\r\n" in cand["url"]:
         url = cand["url"]
         head, inj = url.split("\r\n", 1)
@@ -288,10 +346,18 @@ def issue_identity(seed: dict, carrier: dict) -> dict | None:
 def re_search_route(path: str, code: str) -> str | None:
     import re
 
+    if any(tok in path for tok in (".js", ".py", ".java", ".go", "/Users/", "/home/", "work/PCBV2", "node_modules")):
+        return None
     for blob in (code, path):
         hit = re.search(r"(/[A-Za-z0-9_./-]{3,80})", blob)
-        if hit and not hit.group(1).endswith((".js", ".py", ".java", ".go")):
-            return hit.group(1)
+        if not hit:
+            continue
+        route = hit.group(1)
+        if route.endswith((".js", ".py", ".java", ".go")):
+            continue
+        if any(tok in route for tok in ("/Users/", "/home/", "work/PCBV2")):
+            continue
+        return route
     if path.endswith(".php"):
         return "/" + Path(path).name
     return None
