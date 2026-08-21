@@ -1,0 +1,5 @@
+tree-sitter-language-pack>=0.7
+# Optional (paper §impl backends):
+#   z3-solver     SMT string fragment
+#   semgrep       obligation call-site + taint
+# Joern is an external binary (JOERN_HOME). CodeQL is used when `codeql` is on PATH.

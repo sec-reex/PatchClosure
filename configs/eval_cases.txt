@@ -1,0 +1,26 @@
+# Twenty cases for local analysis. This file is an operator list, not a
+# method input. Stage copies only patch_real.diff and the seed under exp/.
+# Do not fetch all twenty source trees at once: several products are large.
+#
+# Paper language-gap set (plus one robust NONE and one obligation case):
+PCBV2-0001
+PCBV2-0009
+PCBV2-0029
+PCBV2-0038
+PCBV2-0056
+PCBV2-0103
+PCBV2-0115
+PCBV2-0148
+# Additional small / library-sized language-gap cases:
+PCBV2-0003
+PCBV2-0006
+PCBV2-0044
+PCBV2-0057
+PCBV2-0070
+PCBV2-0084
+PCBV2-0109
+PCBV2-0144
+PCBV2-0155
+PCBV2-0157
+PCBV2-0176
+PCBV2-0190

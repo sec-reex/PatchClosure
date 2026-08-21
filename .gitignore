@@ -1,0 +1,37 @@
+# Local Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and machine-local env
+.env
+.env.*
+!.env.example
+
+# JIT workspaces (fetched product trees + staged exp/)
+work/
+
+# Live transcripts. These contain per-run PCBFLAG_* tokens
+# and local controller paths — do not publish.
+out/
+*.jsonl
+
+# Joern writes a project dir named workspace/ under cwd
+workspace/
+cpg.bin/
+*.bin
+
+# Logs / OS / editor
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
