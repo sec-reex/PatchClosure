@@ -101,6 +101,10 @@ EXT_LANG = {
     ".pl": "perl", ".kt": "kotlin", ".scala": "scala",
 }
 
+# QUARANTINED FALLBACK — used ONLY for languages without an installed
+# tree-sitter grammar (perl, erlang, cpp). The primary symbol substrate is
+# pcg_graph.symbol_spans (tree-sitter) + frozen CodeQL queries. Do not add
+# new languages here; add a tree-sitter grammar instead.
 FUNC_SIG = {
     "python": re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\("),
     "javascript": re.compile(
@@ -152,8 +156,16 @@ def _clean_name(name):
     return name if name and name not in KEYWORD_NAMES else None
 
 
-def find_enclosing_function(lines, lineno, lang):
-    """Scan upward from lineno (1-based) for the nearest function signature."""
+def find_enclosing_function(lines, lineno, lang, source_dir=None, rel=None):
+    """Primary: tree-sitter symbol spans via pcg_graph (the single extraction
+    substrate). Fallback: the quarantined FUNC_SIG regex, ONLY for languages
+    without an installed grammar (perl/erlang/cpp) — see FUNC_SIG below."""
+    if source_dir and rel:
+        import pcg_graph
+        if pcg_graph._parser(lang):
+            hit = pcg_graph.enclosing_symbol(os.path.join(source_dir, rel), lang, lineno)
+            if hit and hit["name"] not in KEYWORD_NAMES:
+                return hit
     sig = FUNC_SIG.get(lang) or FUNC_SIG["javascript"]
     start = max(0, lineno - 1)
     for i in range(start, max(-1, start - 250), -1):
@@ -345,7 +357,8 @@ def extract_guards(dfiles, source_dir, lang):
                     entry["relaxation"] = True
                     entry["removed_conditions"] = cond_removed[:4]
             if best and new_lines:
-                fn = find_enclosing_function(new_lines, best[1], file_lang)
+                fn = find_enclosing_function(new_lines, best[1], file_lang,
+                                            source_dir=source_dir, rel=path)
                 if fn:
                     entry["function"] = fn
             guards.append(entry)
@@ -473,7 +486,32 @@ def extract_route_path(line):
 
 
 def discover_routes(source_dir):
+    """Route discovery on the pcg_graph substrate: one tree-sitter dispatch
+    scan (call site paired with a string literal) filtered by the dispatch
+    verbs — replaces the per-framework ROUTE_RX regex pile. The regex table
+    below stays only as the quarantined fallback for languages without a
+    tree-sitter grammar (perl/erlang/cpp)."""
+    import pcg_graph
+    langs = pcg_graph.detect_langs(source_dir)
+    covered = [l for l in langs if pcg_graph._parser(l)]
     routes, seen = [], set()
+    if covered:
+        dispatch, _fx, _ce = pcg_graph.scan_dispatch_points(source_dir, covered, max_files=600)
+        _VERB = re.compile(r"^(get|post|put|delete|patch|head|options|all|any|use|route|"
+                           r"map|match|handle|handlefunc|add|addRoute|addUrlRule|mount|"
+                           r"register|on|resources|resource)$", re.I)
+        for d in dispatch:
+            if not d["route_like"] and not _VERB.match(d.get("call", "")):
+                continue
+            key = (d["file"], d["line"])
+            if key in seen:
+                continue
+            seen.add(key)
+            routes.append({"file": d["file"], "line": d["line"], "kind": f"{d['lang']}:{d['call']}",
+                           "path": d["literal"], "text": f"{d['call']}({d['literal']!r}"[:200]})
+            if len(routes) >= 80:
+                return routes
+    # quarantined fallback for uncovered languages
     for rx, kind in ROUTE_RX:
         for hit in grep_source(source_dir, rx.pattern, ignore_case=False, prod_only=True, cap=60):
             key = (hit["file"], hit["line"])
@@ -624,7 +662,8 @@ def build_siblings(guards, routes, seed, source_dir, lang):
             src = read_source_file(source_dir, hit["file"])
             if src is None:
                 continue
-            fn = find_enclosing_function(src.splitlines(), hit["line"], l2)
+            fn = find_enclosing_function(src.splitlines(), hit["line"], l2,
+                                         source_dir=source_dir, rel=hit["file"])
             if fn and not (fn["name"] == guard_fn and hit["file"] == guard_file):
                 body = function_body(source_dir, hit["file"], fn["line"])
                 add_candidate(hit["file"], fn["line"], fn["name"], None, "calls-patched-fn", body)
@@ -1156,6 +1195,38 @@ def build(pkg_dir, neutral=False):
     facts["source_sparse"] = source_sparse
 
     work = os.path.join(pkg_dir, "work")
+    os.makedirs(work, exist_ok=True)
+
+    # semantic map: deterministic readout-surface index (agent-consumable)
+    try:
+        import semantic_map
+        sm = semantic_map.build_semantic_map(pkg_dir, facts)
+        if sm:
+            with open(os.path.join(work, "semantic_map.md"), "w") as f:
+                f.write(sm)
+            facts["semantic_map"] = True
+    except Exception as e:
+        facts["semantic_map"] = False
+        facts["errors"].append(f"semantic_map: {e!r}")
+
+    # plant facts: where the per-run marker is stored and which code reads it
+    try:
+        import plant_facts
+        case_dir = os.path.realpath(os.path.join(os.path.dirname(
+            os.path.realpath(pkg_dir)), os.path.basename(pkg_dir)))
+        import re as _re
+        m = _re.search(r"(PCBV2-\d+)", pkg_dir)
+        if m:
+            repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            pf = plant_facts.build_plant_facts(
+                os.path.join(repo, "benchmark", "cases", m.group(1)), pkg_dir)
+            if pf:
+                with open(os.path.join(work, "plant_facts.md"), "w") as f:
+                    f.write(pf)
+                facts["plant_facts"] = True
+    except Exception as e:
+        facts["plant_facts"] = False
+        facts["errors"].append(f"plant_facts: {e!r}")
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, "pcg_facts.json"), "w") as f:
         json.dump(facts, f, indent=1, ensure_ascii=False)

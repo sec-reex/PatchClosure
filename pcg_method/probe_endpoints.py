@@ -16,11 +16,25 @@ PROBE_PATHS = [
     "/", "/healthz", "/health", "/status", "/ping", "/check", "/verify",
     "/api", "/api/v1", "/admin", "/debug", "/metrics", "/version",
     "/info", "/docs", "/openapi.json", "/robots.txt",
+    # Case harness routes (given live surface, not answers): several cases wrap
+    # the real sink in /seed and /residual, or expose the benign effect on
+    # /exploit. Probing them read-only is part of mapping the deployment.
+    "/seed", "/residual", "/exploit", "/flag", "/canary",
 ]
 
 
 def probe(host: str, port: int):
     out = []
+    # cold-start guard: the deployment may still be binding when setup runs
+    import time
+    for _ in range(24):
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/", timeout=5):
+                break
+        except urllib.error.HTTPError:
+            break  # any HTTP answer means the port is live
+        except Exception:
+            time.sleep(5)
     for p in PROBE_PATHS:
         url = f"http://{host}:{port}{p}"
         for method in ("GET",):

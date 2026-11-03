@@ -7,7 +7,7 @@ guard-implementation lookup, entry map, sibling candidates, transform facts, and
 suggested construction plan.
 
 EXECUTION PROTOCOL
-1. Read work/pcg_guide.md first, then task.md. Execute the guide's plan in its
+1. Read work/pcg_guide.md first, then task.md. If work/semantic_map.md exists, use it to locate the channels where a planted value can become observable (output/file sites, routes, session entry points) BEFORE constructing inputs - a candidate is only verifiable through such a channel.  If work/credentials.md exists, those are the deployment's setup-created accounts — use them the way the seed request does when a candidate needs an authenticated session. Execute the guide's plan in its
    suggested order. The guide is evidence, not gospel — verify file:line claims as
    you go.
 2. Start probing the live instance within the first few minutes. Reading source
