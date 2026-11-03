@@ -364,7 +364,7 @@ def _percent_split(s: str) -> str:
     the shape double-decoding consumers realize (an ap_escape/unescape
     round-trip re-encodes the payload but not the stray percent). Empirically
     the ALL-tokens form is what defeats the double decode — a mixed
-    first-token-only form still normalizes away (PCBV2-0002: 200 vs 400)."""
+    first-token-only form still normalizes away."""
     if "%" not in s:
         return s
     return re.sub(r"%u[0-9a-fA-F]{4}|%[0-9a-fA-F]{2}",
